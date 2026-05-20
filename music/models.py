@@ -21,8 +21,29 @@ class Song(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        # один трек на одного юзера
         unique_together = [('user', 'deezer_id')]
 
     def __str__(self):
         return f"{self.artist} — {self.title}"
+
+
+class ChatMessage(models.Model):
+    ROLE_CHOICES = [('user', 'user'), ('bot', 'bot')]
+
+    user = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='chat_messages',
+        verbose_name='Пользователь',
+    )
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"[{self.role}] {self.content[:60]}"

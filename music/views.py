@@ -9,14 +9,14 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Song
+from .models import ChatMessage, Song
+from .music_bot import process_message
 
 DEEZER_TIMEOUT_SECONDS = 10
 DEEZER_PAGE_SIZE = 20
 
 
 def _get_favorite_map(user):
-    """Возвращает {deezer_id: song_id} для избранных треков юзера."""
     if not user or not user.is_authenticated:
         return {}
     qs = (Song.objects
@@ -49,7 +49,6 @@ def home(request):
         track["is_favorite"] = track_id in favorite_map
         track["favorite_song_id"] = favorite_map.get(track_id)
 
-    # Недавно добавленные треки для главной (когда нет запроса)
     recent_songs = []
     if not query and request.user.is_authenticated:
         recent_songs = list(
@@ -66,7 +65,6 @@ def home(request):
 
 
 def search_more(request):
-    """AJAX endpoint для infinite scroll."""
     query = request.GET.get("q", "").strip()
     index = int(request.GET.get("index", DEEZER_PAGE_SIZE))
 
@@ -152,7 +150,52 @@ def toggle_favorite(request, song_id):
     return redirect(request.POST.get("next") or "favorites")
 
 
-# ── AUTH ──
+# ── CHAT ──────────────────────────────────────────────────────────────────────
+
+def chat_view(request):
+    """Страница чат-бота Music Assistant."""
+    user = request.user if request.user.is_authenticated else None
+
+    if request.method == "POST":
+        user_text = request.POST.get("message", "").strip()
+
+        if not user_text:
+            return JsonResponse({"error": "empty"}, status=400)
+
+        # Очистить историю
+        if user_text.lower() in ('очисти историю', 'очистить историю', 'сбрось историю'):
+            if user:
+                ChatMessage.objects.filter(user=user).delete()
+            return JsonResponse({"bot": "История чата очищена! 🗑️", "cleared": True})
+
+        # Сохраняем сообщение пользователя
+        ChatMessage.objects.create(user=user, role='user', content=user_text)
+
+        # Получаем ответ бота
+        bot_reply = process_message(user_text, user=request.user)
+
+        # Спец-команда очистки из бота
+        if bot_reply == '__clear__':
+            if user:
+                ChatMessage.objects.filter(user=user).delete()
+            bot_reply = 'История чата очищена! 🗑️'
+            return JsonResponse({"bot": bot_reply, "cleared": True})
+
+        # Сохраняем ответ бота
+        ChatMessage.objects.create(user=user, role='bot', content=bot_reply)
+
+        return JsonResponse({"bot": bot_reply})
+
+    # GET — рендерим страницу с историей
+    if user:
+        history = ChatMessage.objects.filter(user=user).order_by('created_at')[:100]
+    else:
+        history = []
+
+    return render(request, "music/chat.html", {"history": history})
+
+
+# ── AUTH ──────────────────────────────────────────────────────────────────────
 
 def register_view(request):
     if request.user.is_authenticated:

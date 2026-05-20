@@ -10,11 +10,15 @@
     <link rel="stylesheet" href="{% static 'music/style.css' %}">
 </head>
 <body>
+<!-- Передаём username в JS для изоляции localStorage -->
+<div id="app-meta"
+     data-user="{{ user.username|default:'' }}"
+     style="display:none"></div>
+
 <div class="layout">
     <aside class="sidebar">
         <a href="{% url 'home' %}" class="logo">
             <span class="logo-mark">
-                <!-- Waveform icon -->
                 <svg viewBox="0 0 16 16">
                     <line x1="1" y1="8" x2="1" y2="8" stroke-width="2"/>
                     <line x1="4" y1="5" x2="4" y2="11" stroke-width="2"/>
@@ -35,6 +39,10 @@
         <a href="{% url 'favorites' %}" class="nav-link {% if request.resolver_match.url_name == 'favorites' %}active{% endif %}">
             <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
             Избранное
+        </a>
+        <a href="{% url 'chat' %}" class="nav-link {% if request.resolver_match.url_name == 'chat' %}active{% endif %}">
+            <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Music Assistant
         </a>
 
         <div class="sidebar-bottom">
@@ -146,6 +154,28 @@
 <audio id="audio" preload="none"></audio>
 
 <script>
+// ── USER-SCOPED localStorage ──────────────────────────────────────────────────
+// Фикс бага: недавно прослушанные хранятся per-user, не глобально
+const _appUser = document.getElementById('app-meta').dataset.user || '__guest__';
+const _recentKey = `ms_recent__${_appUser}`;
+const _volKey    = `ms_volume__${_appUser}`;
+
+function saveRecentTrack(track) {
+    try {
+        let recent = JSON.parse(localStorage.getItem(_recentKey) || '[]');
+        recent = recent.filter(t => t.url !== track.url);
+        recent.unshift(track);
+        recent = recent.slice(0, 12);
+        localStorage.setItem(_recentKey, JSON.stringify(recent));
+    } catch(e) {}
+}
+
+function getRecentTracks() {
+    try { return JSON.parse(localStorage.getItem(_recentKey) || '[]'); }
+    catch(e) { return []; }
+}
+
+// ── PLAYER ────────────────────────────────────────────────────────────────────
 const audio        = document.getElementById('audio');
 const mini         = document.getElementById('mini-player');
 const expanded     = document.getElementById('expanded-player');
@@ -171,9 +201,6 @@ const hint           = document.getElementById('player-hint');
 
 let trackQueue = [];
 let currentIdx = -1;
-// Флаг: пользователь уже взаимодействовал со страницей (autoplay policy)
-let userGestured = false;
-// Трек ожидающий воспроизведения после первого жеста
 let pendingPlay = null;
 
 function fmt(sec) {
@@ -193,11 +220,11 @@ function setVolume(val) {
   audio.volume = val / 100;
   fillSlider(volMini, val);
   fillSlider(volExp, val);
-  try { localStorage.setItem('ms_volume', val); } catch(e) {}
+  try { localStorage.setItem(_volKey, val); } catch(e) {}
 }
 
 const savedVol = (() => {
-  try { const v = parseInt(localStorage.getItem('ms_volume')); return isNaN(v) ? 80 : v; }
+  try { const v = parseInt(localStorage.getItem(_volKey)); return isNaN(v) ? 80 : v; }
   catch(e) { return 80; }
 })();
 audio.volume = savedVol / 100;
@@ -248,7 +275,6 @@ async function startPlayback(url, title, artist, image) {
   markPlaying(url);
   mini.classList.remove('hidden');
 
-  // Сброс прогресса
   fillSlider(progress, 0);
   fillSlider(progressMini, 0);
   currentTimeLbl.textContent = '0:00';
@@ -263,14 +289,11 @@ async function startPlayback(url, title, artist, image) {
     await audio.play();
     setPlayUI(true);
   } catch (err) {
-    // NotAllowedError — браузер заблокировал автовоспроизведение
     if (err.name === 'NotAllowedError') {
       setPlayUI(false);
       setHint('▶ Нажмите Play для воспроизведения', false);
-      // Сохраняем трек как ожидающий — он запустится при первом нажатии Play
       pendingPlay = { url, title, artist, image };
     } else {
-      // Ошибка загрузки (CORS, 404, недоступный URL)
       setPlayUI(false);
       setHint('Трек недоступен для воспроизведения', true);
       markPlaying(null);
@@ -303,7 +326,6 @@ function playAtIndex(i) {
 }
 
 async function togglePlayback() {
-  // Если есть ожидающий трек — запускаем его (первый жест пользователя)
   if (pendingPlay) {
     const p = pendingPlay;
     pendingPlay = null;
@@ -327,22 +349,6 @@ async function togglePlayback() {
   }
 }
 
-function saveRecentTrack(track) {
-  try {
-    let recent = JSON.parse(localStorage.getItem('ms_recent') || '[]');
-    recent = recent.filter(t => t.url !== track.url);
-    recent.unshift(track);
-    recent = recent.slice(0, 12);
-    localStorage.setItem('ms_recent', JSON.stringify(recent));
-  } catch(e) {}
-}
-
-function getRecentTracks() {
-  try { return JSON.parse(localStorage.getItem('ms_recent') || '[]'); }
-  catch(e) { return []; }
-}
-
-// Ошибка загрузки медиа (CORS, недоступный URL, etc.)
 audio.addEventListener('error', () => {
   if (!audio.src || audio.src === window.location.href) return;
   setPlayUI(false);
@@ -350,7 +356,6 @@ audio.addEventListener('error', () => {
   markPlaying(null);
 });
 
-// Зависание загрузки — stall больше 8 секунд
 let stallTimer = null;
 audio.addEventListener('waiting', () => {
   stallTimer = setTimeout(() => {
@@ -380,7 +385,6 @@ document.getElementById('expanded-next').addEventListener('click', () => playAtI
 fillSlider(volMini, savedVol);
 fillSlider(volExp, savedVol);
 
-// Синхронизируем UI строго по событиям audio-элемента
 audio.addEventListener('pause', () => { if (!pendingPlay) setPlayUI(false); });
 audio.addEventListener('play',  () => setPlayUI(true));
 audio.addEventListener('ended', () => playAtIndex(currentIdx + 1));
