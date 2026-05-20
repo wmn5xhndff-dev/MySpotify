@@ -28,7 +28,7 @@ HELP_TEXT = """Я Music Assistant — твой музыкальный помощ
 - кто такой [артист] — биография
 - расскажи о [жанр]
 - настроение — подбор музыки по настроению
-- совет — рекомендация
+- совет — recommendation
 - сколько у меня избранных
 - очисти историю (clear)"""
 
@@ -75,7 +75,8 @@ MOOD_QUERIES = {
     'тренировк': "phonk",
 }
 
-MAIN_CHIPS = ["❔помощь", "🎶 совет", "🎭 настроение", "найди трек", "назад"]
+MAIN_CHIPS = ["❔ помощь", "🎶 совет", "🎭 настроение", "🔎 найти трек", "📚 избранное"]
+SEARCH_CHIPS = ["🔎 найти трек", "🎶 совет", "🎭 настроение"]
 
 _rec_idx = [0]
 
@@ -164,13 +165,13 @@ def process_message(text: str, user=None) -> dict:
         return _reply(
             mood_text,
             tracks=tracks,
-            suggestions=["🔄 обновить треки", "🎭 другое настроение", "🔍 найди трек"]
+            suggestions=["🔄 обновить", "🎭 другое настроение", "🔎 найти трек"]
         )
 
     # Обновить треки — повтор последнего настроения (простой рефреш через совет)
-    if msg in ('🔄 обновить треки',):
+    if msg in ('🔄 обновить треки', '🔄 обновить'):
         tracks = _deezer_search("top hits popular", limit=5)
-        return _reply("Вот новые треки:", tracks=tracks, suggestions=["🔄 обновить треки", "🎭 другое настроение", "найди трек"])
+        return _reply("Вот новая подборка:", tracks=tracks, suggestions=["🔄 обновить", "🎭 другое настроение", "🔎 найти трек"])
 
     if msg in ('🎭 другое настроение',):
         msg = 'настроение'  # fall through к блоку настроения ниже
@@ -193,14 +194,14 @@ def process_message(text: str, user=None) -> dict:
 
     # 4. Помощь
     if any(h in msg for h in HELP_KEYWORDS):
-        return _reply(HELP_TEXT, suggestions=["совет", "🎭 настроение", "найди трек", "топ треков", "кто такой", "назад"])
+        return _reply(HELP_TEXT, suggestions=["🎶 совет", "🎭 настроение", "🔎 найти трек", "топ треков", "кто такой", "📚 избранное"])
 
     # 5. Очистка
     if 'очисти' in msg or 'очистить' in msg or 'сбрось' in msg or 'сбросить' in msg or 'очистка' in msg or 'сброс' in msg or 'clear' in msg:
         return _reply("__clear__")
 
     # 6. Статистика избранных
-    if any(w in msg for w in ['избранн', 'сколько треков', 'моих треков', 'моя библиотека']):
+    if any(w in msg for w in ['избранн', 'сколько треков', 'моих треков', 'моя библиотека', '📚 избранное']):
         if user and user.is_authenticated:
             count = user.songs.filter(is_favorite=True).count()
             if count == 0:
@@ -232,7 +233,7 @@ def process_message(text: str, user=None) -> dict:
         )
 
     # 10. Ещё совет
-    if 'ещё' in msg and 'совет' in msg:
+    if ('ещё' in msg and 'совет' in msg) or msg == '🎶 ещё совет':
         rec = RECOMMENDATIONS[_rec_idx[0] % len(RECOMMENDATIONS)]
         _rec_idx[0] += 1
         tracks = _deezer_search(f"{rec[0]} {rec[1]}", limit=4)
@@ -285,14 +286,14 @@ def process_message(text: str, user=None) -> dict:
         return _reply(f"Треки артиста {query.title()}:", tracks=tracks, suggestions=[f"кто такой {query}", "совет"])
 
     # 15. Найти трек
-    if re.search(r'найди трек|найди песню|поищи|найди|🔍 найди трек', msg):
+    if re.search(r'найди трек|найди песню|поищи|найди|🔍 найди трек|🔎 найти трек', msg):
         query = re.sub(r'найди трек|найди песню|поищи трек|поищи|найди|🔍 найди трек', '', msg).strip()
         if not query:
-            return _reply("Напиши название трека.")
+            return _reply("Напиши название трека.", suggestions=SEARCH_CHIPS)
         tracks = _deezer_search(query, limit=5)
         if tracks:
-            return _reply(f"Результаты поиска «{query}»:", tracks=tracks, suggestions=["ещё совет", "помощь", "назад"])
-        return _reply(f"Ничего не нашел по запросу «{query}».", suggestions=["попробуй другой запрос", "помощь", "назад"])
+            return _reply(f"Результаты поиска «{query}»:", tracks=tracks, suggestions=["🎶 ещё совет", "❔ помощь", "🎭 настроение"])
+        return _reply(f"Ничего не нашел по запросу «{query}».", suggestions=["🔎 найти трек", "❔ помощь", "🎭 настроение"])
 
     # 16. Текстовое настроение
     for mood_key, mood_query in MOOD_QUERIES.items():
