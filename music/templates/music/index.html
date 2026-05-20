@@ -1,0 +1,230 @@
+{% extends 'music/base.html' %}
+
+{% block title %}Поиск — MySpotify{% endblock %}
+
+{% block content %}
+<section class="hero block glass">
+    <h1>Музыкальная библиотека</h1>
+    <p class="muted">Ищи треки, слушай и добавляй лучшие в избранное.</p>
+    <form method="get" action="{% url 'home' %}" class="search-form" id="search-form">
+        <input type="text" name="q" value="{{ query }}" placeholder="Название или артист…" autofocus autocomplete="off">
+        <button type="submit" class="accent">Найти</button>
+    </form>
+</section>
+
+<section class="block glass" id="results-section">
+    {% if query %}
+    <h2>Результаты по «{{ query }}»</h2>
+    <ul class="track-list" id="track-list">
+        {% for track in results %}
+        {% with cover=track.album.cover_xl|default:track.album.cover_big|default:track.album.cover_medium %}
+        <li class="track-row"
+            data-preview="{{ track.preview }}"
+            data-title="{{ track.title|escapejs }}"
+            data-artist="{{ track.artist.name|escapejs }}"
+            data-image="{{ cover }}"
+            onclick="playTrack('{{ track.preview }}', '{{ track.title|escapejs }}', '{{ track.artist.name|escapejs }}', '{{ cover }}')">
+            <span class="track-num">{{ forloop.counter }}</span>
+            <img src="{{ track.album.cover_medium }}" alt="{{ track.title }}" loading="lazy">
+            <div class="track-meta">
+                <strong>{{ track.title }}</strong>
+                <span>{{ track.artist.name }}</span>
+            </div>
+            <div class="row-actions">
+                {% if track.is_favorite %}
+                <form method="post" action="{% url 'toggle_favorite' track.favorite_song_id %}" onclick="event.stopPropagation()">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="icon-btn heart-btn active" title="Убрать из избранного">♥</button>
+                </form>
+                {% else %}
+                <form method="post" action="{% url 'add_song' %}" onclick="event.stopPropagation()">
+                    {% csrf_token %}
+                    <input type="hidden" name="title" value="{{ track.title }}">
+                    <input type="hidden" name="artist" value="{{ track.artist.name }}">
+                    <input type="hidden" name="image_url" value="{{ cover }}">
+                    <input type="hidden" name="deezer_id" value="{{ track.id }}">
+                    <input type="hidden" name="preview_url" value="{{ track.preview }}">
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="icon-btn heart-btn" title="В избранное">♡</button>
+                </form>
+                {% endif %}
+            </div>
+        </li>
+        {% endwith %}
+        {% empty %}
+        <li style="padding:20px 0;color:var(--muted);text-align:center">
+            Ничего не найдено по запросу «{{ query }}».
+        </li>
+        {% endfor %}
+    </ul>
+
+    <div id="scroll-sentinel" style="height:1px;margin-top:20px;"></div>
+    <div id="loading-indicator" style="display:none;text-align:center;padding:16px;color:var(--muted);font-size:13px;">
+        Загружаем ещё треки…
+    </div>
+
+    {% else %}
+    <!-- Recently played — rendered by JS from localStorage -->
+    <h2 id="recent-heading" style="display:none">Недавно прослушанные</h2>
+    <ul class="track-list" id="recent-list"></ul>
+    <div class="empty-hint" id="empty-hint">
+        <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <p>Введи название трека или исполнителя и нажми «Найти»</p>
+    </div>
+    {% endif %}
+</section>
+
+<div id="page-data"
+     data-query="{{ query|escapejs }}"
+     data-initial-count="{{ results|length }}"
+     data-has-more="{% if has_more %}1{% else %}0{% endif %}"
+     style="display:none"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── RECENTLY PLAYED (client-side) ──
+(function() {
+    const list = document.getElementById('recent-list');
+    if (!list) return;
+
+    const heading   = document.getElementById('recent-heading');
+    const emptyHint = document.getElementById('empty-hint');
+    const recent    = getRecentTracks().slice(0, 10);
+
+    if (!recent.length) return;
+
+    heading.style.display = '';
+    emptyHint.style.display = 'none';
+
+    function esc(str) {
+        return String(str || '')
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    recent.forEach((t, i) => {
+        const li = document.createElement('li');
+        li.className = 'track-row';
+        li.dataset.preview = t.url   || '';
+        li.dataset.title   = t.title || '';
+        li.dataset.artist  = t.artist|| '';
+        li.dataset.image   = t.image || '';
+
+        li.addEventListener('click', () => playTrack(t.url, t.title, t.artist, t.image));
+
+        const imgHTML = t.image
+            ? `<img src="${esc(t.image)}" alt="${esc(t.title)}" loading="lazy">`
+            : `<div style="width:50px;height:50px;border-radius:8px;background:var(--panel-2);display:flex;align-items:center;justify-content:center;color:var(--muted);flex-shrink:0">♪</div>`;
+
+        li.innerHTML = `
+            <span class="track-num">${i + 1}</span>
+            ${imgHTML}
+            <div class="track-meta">
+                <strong>${esc(t.title)}</strong>
+                <span>${esc(t.artist)}</span>
+            </div>
+        `;
+
+        list.appendChild(li);
+    });
+
+    buildQueue();
+})();
+
+// ── INFINITE SCROLL ──
+(function () {
+    const pageData = document.getElementById('page-data');
+    const QUERY = pageData.dataset.query;
+    const HAS_MORE_INIT = pageData.dataset.hasMore === '1';
+    let currentIndex = parseInt(pageData.dataset.initialCount, 10);
+
+    if (!QUERY || !HAS_MORE_INIT) return;
+
+    const list = document.getElementById('track-list');
+    const sentinel = document.getElementById('scroll-sentinel');
+    const loader = document.getElementById('loading-indicator');
+
+    let loading = false;
+    let exhausted = false;
+
+    function getCsrf() {
+        return document.cookie.split(';')
+            .map(c => c.trim())
+            .find(c => c.startsWith('csrftoken='))
+            ?.split('=')[1] || '';
+    }
+
+    function escapeHTML(str) {
+        return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function makeTrackRow(t, num) {
+        const li = document.createElement('li');
+        li.className = 'track-row';
+        li.dataset.preview = t.preview || '';
+        li.dataset.title   = t.title;
+        li.dataset.artist  = t.artist_name;
+        li.dataset.image   = t.cover_xl || '';
+
+        li.addEventListener('click', e => {
+            if (e.target.closest('form')) return;
+            playTrack(t.preview, t.title, t.artist_name, t.cover_xl);
+        });
+
+        const csrf = getCsrf();
+
+        let heartHTML;
+        if (t.is_favorite && t.favorite_song_id) {
+            heartHTML = `<form method="post" action="/favorite/${t.favorite_song_id}/toggle/" onclick="event.stopPropagation()">
+                <input type="hidden" name="csrfmiddlewaretoken" value="${csrf}">
+                <input type="hidden" name="next" value="${location.pathname}${location.search}">
+                <button type="submit" class="icon-btn heart-btn active" title="Убрать">♥</button>
+            </form>`;
+        } else {
+            heartHTML = `<form method="post" action="/add/" onclick="event.stopPropagation()">
+                <input type="hidden" name="csrfmiddlewaretoken" value="${csrf}">
+                <input type="hidden" name="title" value="${escapeHTML(t.title)}">
+                <input type="hidden" name="artist" value="${escapeHTML(t.artist_name)}">
+                <input type="hidden" name="image_url" value="${escapeHTML(t.cover_xl||'')}">
+                <input type="hidden" name="deezer_id" value="${escapeHTML(t.id)}">
+                <input type="hidden" name="preview_url" value="${escapeHTML(t.preview||'')}">
+                <input type="hidden" name="next" value="${location.pathname}${location.search}">
+                <button type="submit" class="icon-btn heart-btn" title="В избранное">♡</button>
+            </form>`;
+        }
+
+        li.innerHTML = `
+            <span class="track-num">${num}</span>
+            <img src="${escapeHTML(t.cover_medium)}" alt="${escapeHTML(t.title)}" loading="lazy">
+            <div class="track-meta">
+                <strong>${escapeHTML(t.title)}</strong>
+                <span>${escapeHTML(t.artist_name)}</span>
+            </div>
+            <div class="row-actions">${heartHTML}</div>
+        `;
+        return li;
+    }
+
+    async function loadMore() {
+        if (loading || exhausted) return;
+        loading = true; loader.style.display = 'block';
+        try {
+            const res = await fetch(`/api/search-more/?q=${encodeURIComponent(QUERY)}&index=${currentIndex}`);
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            data.tracks.forEach((t, i) => list.appendChild(makeTrackRow(t, currentIndex + i + 1)));
+            currentIndex += data.tracks.length;
+            exhausted = !data.has_more;
+            buildQueue();
+        } catch(e) { console.error(e); }
+        finally { loading = false; loader.style.display = 'none'; }
+    }
+
+    new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting) loadMore();
+    }, { root: document.getElementById('main-content'), rootMargin: '300px' }).observe(sentinel);
+})();
+</script>
+{% endblock %}

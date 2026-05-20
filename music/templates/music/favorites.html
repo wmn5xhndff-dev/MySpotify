@@ -1,0 +1,57 @@
+{% extends 'music/base.html' %}
+
+{% block title %}Избранное — MySpotify{% endblock %}
+
+{% block content %}
+<section class="hero block glass">
+    <h1>Избранное</h1>
+    {% if user.is_authenticated %}
+    <p class="muted">Сохранённые треки пользователя <strong>{{ user.username }}</strong>.</p>
+    {% else %}
+    <p class="muted"><a href="{% url 'login' %}" style="color:var(--accent)">Войдите</a>, чтобы видеть своё избранное.</p>
+    {% endif %}
+</section>
+
+<section class="block glass">
+    <ul class="track-list">
+        {% for song in songs %}
+        <li class="track-row"
+            data-preview="{{ song.preview_url|default:'' }}"
+            data-title="{{ song.title|escapejs }}"
+            data-artist="{{ song.artist|escapejs }}"
+            data-image="{{ song.image_url|default:'' }}"
+            onclick="playTrack('{{ song.preview_url|default:'' }}', '{{ song.title|escapejs }}', '{{ song.artist|escapejs }}', '{{ song.image_url|default:'' }}')">
+            <span class="track-num">{{ forloop.counter }}</span>
+            {% if song.image_url %}
+            <img src="{{ song.image_url }}" alt="{{ song.title }}" loading="lazy">
+            {% else %}
+            <div style="width:50px;height:50px;border-radius:8px;background:var(--panel-2);display:flex;align-items:center;justify-content:center;color:var(--muted);flex-shrink:0">♪</div>
+            {% endif %}
+            <div class="track-meta">
+                <strong>{{ song.title }}</strong>
+                <span>{{ song.artist }}</span>
+            </div>
+            <div class="row-actions">
+                <form method="post" action="{% url 'toggle_favorite' song.id %}" onclick="event.stopPropagation()">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{% url 'favorites' %}">
+                    <button type="submit" class="icon-btn heart-btn active" title="Убрать из избранного">♥</button>
+                </form>
+            </div>
+        </li>
+        {% empty %}
+        <li style="padding:20px 0;color:var(--muted);text-align:center">
+            {% if user.is_authenticated %}
+            Пока нет избранных треков. <a href="{% url 'home' %}" style="color:var(--accent)">Найди музыку →</a>
+            {% else %}
+            <a href="{% url 'login' %}" style="color:var(--accent)">Войди</a>, чтобы добавлять треки в избранное.
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>document.addEventListener('DOMContentLoaded', buildQueue);</script>
+{% endblock %}

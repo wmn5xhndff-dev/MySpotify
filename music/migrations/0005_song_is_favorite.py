@@ -1,0 +1,16 @@
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('music', '0004_remove_song_added_by_remove_song_external_image_url_and_more'),
+    ]
+
+    operations = [
+        migrations.AddField(
+            model_name='song',
+            name='is_favorite',
+            field=models.BooleanField(default=False),
+        ),
+    ]

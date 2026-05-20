@@ -1,0 +1,419 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MySpotify{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'music/style.css' %}">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <a href="{% url 'home' %}" class="logo">
+            <span class="logo-mark">
+                <!-- Waveform icon -->
+                <svg viewBox="0 0 16 16">
+                    <line x1="1" y1="8" x2="1" y2="8" stroke-width="2"/>
+                    <line x1="4" y1="5" x2="4" y2="11" stroke-width="2"/>
+                    <line x1="7" y1="2" x2="7" y2="14" stroke-width="2"/>
+                    <line x1="10" y1="5" x2="10" y2="11" stroke-width="2"/>
+                    <line x1="13" y1="6" x2="13" y2="10" stroke-width="2"/>
+                    <line x1="16" y1="8" x2="16" y2="8" stroke-width="2"/>
+                </svg>
+            </span>
+            MySpotify
+        </a>
+
+        <span class="nav-section">Меню</span>
+        <a href="{% url 'home' %}" class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            Поиск
+        </a>
+        <a href="{% url 'favorites' %}" class="nav-link {% if request.resolver_match.url_name == 'favorites' %}active{% endif %}">
+            <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            Избранное
+        </a>
+
+        <div class="sidebar-bottom">
+            {% if user.is_authenticated %}
+            <div class="user-row">
+                <div class="avatar">{{ user.username|first|upper }}</div>
+                <div class="user-info">
+                    <div class="username">{{ user.username }}</div>
+                    <div class="user-sub">Слушатель</div>
+                </div>
+            </div>
+            <a href="{% url 'logout' %}" class="nav-link">
+                <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Выйти
+            </a>
+            {% else %}
+            <a href="{% url 'login' %}" class="nav-link {% if request.resolver_match.url_name == 'login' %}active{% endif %}">
+                <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                Войти
+            </a>
+            <a href="{% url 'register' %}" class="nav-link {% if request.resolver_match.url_name == 'register' %}active{% endif %}">
+                <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                Регистрация
+            </a>
+            {% endif %}
+        </div>
+    </aside>
+
+    <main class="content" id="main-content">
+        {% block content %}{% endblock %}
+    </main>
+</div>
+
+<!-- ── MINI PLAYER ── -->
+<div class="mini-player hidden" id="mini-player">
+    <img id="player-cover" src="" alt="cover" onclick="document.getElementById('expanded-player').classList.add('show')">
+    <div class="player-text" onclick="document.getElementById('expanded-player').classList.add('show')">
+        <strong id="player-title">Ничего не играет</strong>
+        <span id="player-artist">Выберите трек</span>
+    </div>
+
+    <div class="mini-progress-wrap">
+        <div class="mini-progress-row">
+            <span class="time-label" id="mini-current">0:00</span>
+            <input id="progress-mini" type="range" min="0" max="100" value="0" step="0.1">
+            <span class="time-label right" id="mini-duration">0:00</span>
+        </div>
+    </div>
+
+    <div class="mini-right">
+        <button class="mini-skip" id="mini-prev" type="button">⏮</button>
+        <button class="mini-play-btn" id="player-toggle" type="button">▶</button>
+        <button class="mini-skip" id="mini-next" type="button">⏭</button>
+        <div class="mini-vol-wrap">
+            <svg viewBox="0 0 24 24">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path id="vol-wave-mini" d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+            <input id="volume-mini" type="range" min="0" max="100" value="100" step="1" class="vol-slider mini-vol">
+        </div>
+    </div>
+</div>
+
+<!-- ── FULLSCREEN EXPANDED PLAYER ── -->
+<div class="expanded-player" id="expanded-player">
+    <div class="exp-bg" id="exp-bg"></div>
+    <div class="exp-overlay"></div>
+
+    <div class="exp-layout">
+        <div class="exp-cover-wrap">
+            <img id="expanded-cover" src="" alt="cover">
+        </div>
+
+        <div class="exp-controls">
+            <div class="exp-top-row">
+                <button class="close" id="close-expanded" type="button">✕</button>
+            </div>
+
+            <div class="exp-meta">
+                <h2 id="expanded-title">Ничего не играет</h2>
+                <p id="expanded-artist">—</p>
+            </div>
+
+            <div class="progress-wrap">
+                <span id="current-time">0:00</span>
+                <input id="progress" type="range" min="0" max="100" value="0" step="0.1">
+                <span id="duration-time">0:00</span>
+            </div>
+
+            <div class="big-actions">
+                <button id="expanded-prev" type="button">⏮</button>
+                <button class="icon-btn lg" id="expanded-toggle" type="button">▶</button>
+                <button id="expanded-next" type="button">⏭</button>
+            </div>
+
+            <div class="exp-vol-row">
+                <svg viewBox="0 0 24 24">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                    <path id="vol-wave-exp" d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                </svg>
+                <input id="volume-exp" type="range" min="0" max="100" value="100" step="1" class="vol-slider exp-vol">
+            </div>
+
+            <p id="player-hint" class="hint"></p>
+        </div>
+    </div>
+</div>
+
+<audio id="audio" preload="none"></audio>
+
+<script>
+const audio        = document.getElementById('audio');
+const mini         = document.getElementById('mini-player');
+const expanded     = document.getElementById('expanded-player');
+const expBg        = document.getElementById('exp-bg');
+
+const playerTitle    = document.getElementById('player-title');
+const playerArtist   = document.getElementById('player-artist');
+const playerCover    = document.getElementById('player-cover');
+const expTitle       = document.getElementById('expanded-title');
+const expArtist      = document.getElementById('expanded-artist');
+const expCover       = document.getElementById('expanded-cover');
+const toggleBtn      = document.getElementById('player-toggle');
+const expToggleBtn   = document.getElementById('expanded-toggle');
+const progress       = document.getElementById('progress');
+const progressMini   = document.getElementById('progress-mini');
+const currentTimeLbl = document.getElementById('current-time');
+const durationTimeLbl= document.getElementById('duration-time');
+const miniCurrent    = document.getElementById('mini-current');
+const miniDuration   = document.getElementById('mini-duration');
+const volMini        = document.getElementById('volume-mini');
+const volExp         = document.getElementById('volume-exp');
+const hint           = document.getElementById('player-hint');
+
+let trackQueue = [];
+let currentIdx = -1;
+// Флаг: пользователь уже взаимодействовал со страницей (autoplay policy)
+let userGestured = false;
+// Трек ожидающий воспроизведения после первого жеста
+let pendingPlay = null;
+
+function fmt(sec) {
+  if (!Number.isFinite(sec)) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+function fillSlider(el, pct) {
+  el.style.setProperty('--pct', pct + '%');
+  el.value = pct;
+}
+
+function setVolume(val) {
+  val = Math.max(0, Math.min(100, val));
+  audio.volume = val / 100;
+  fillSlider(volMini, val);
+  fillSlider(volExp, val);
+  try { localStorage.setItem('ms_volume', val); } catch(e) {}
+}
+
+const savedVol = (() => {
+  try { const v = parseInt(localStorage.getItem('ms_volume')); return isNaN(v) ? 80 : v; }
+  catch(e) { return 80; }
+})();
+audio.volume = savedVol / 100;
+
+function setPlayUI(playing) {
+  const icon = playing ? '⏸' : '▶';
+  toggleBtn.textContent = icon;
+  expToggleBtn.textContent = icon;
+}
+
+function setHint(msg, isError) {
+  hint.textContent = msg;
+  hint.style.color = isError ? '#e06070' : 'var(--muted)';
+}
+
+function setExpBg(imgUrl) {
+  expBg.style.backgroundImage = imgUrl ? `url('${imgUrl}')` : 'none';
+}
+
+function buildQueue() {
+  const rows = document.querySelectorAll('.track-row[data-preview]');
+  trackQueue = Array.from(rows).map(r => ({
+    preview: r.dataset.preview,
+    title:   r.dataset.title,
+    artist:  r.dataset.artist,
+    image:   r.dataset.image,
+  }));
+}
+
+function markPlaying(url) {
+  document.querySelectorAll('.track-row').forEach(r => r.classList.remove('playing'));
+  if (!url) return;
+  const row = document.querySelector(`.track-row[data-preview="${CSS.escape(url)}"]`);
+  if (row) row.classList.add('playing');
+}
+
+function updateTrackUI(title, artist, image) {
+  [playerTitle, expTitle].forEach(el => el.textContent = title);
+  [playerArtist, expArtist].forEach(el => el.textContent = artist);
+  playerCover.src = image || '';
+  expCover.src = image || '';
+  setExpBg(image);
+}
+
+async function startPlayback(url, title, artist, image) {
+  setHint('');
+  updateTrackUI(title, artist, image);
+  markPlaying(url);
+  mini.classList.remove('hidden');
+
+  // Сброс прогресса
+  fillSlider(progress, 0);
+  fillSlider(progressMini, 0);
+  currentTimeLbl.textContent = '0:00';
+  miniCurrent.textContent = '0:00';
+  durationTimeLbl.textContent = '0:00';
+  miniDuration.textContent = '0:00';
+
+  audio.src = url;
+  audio.load();
+
+  try {
+    await audio.play();
+    setPlayUI(true);
+  } catch (err) {
+    // NotAllowedError — браузер заблокировал автовоспроизведение
+    if (err.name === 'NotAllowedError') {
+      setPlayUI(false);
+      setHint('▶ Нажмите Play для воспроизведения', false);
+      // Сохраняем трек как ожидающий — он запустится при первом нажатии Play
+      pendingPlay = { url, title, artist, image };
+    } else {
+      // Ошибка загрузки (CORS, 404, недоступный URL)
+      setPlayUI(false);
+      setHint('Трек недоступен для воспроизведения', true);
+      markPlaying(null);
+    }
+  }
+
+  saveRecentTrack({ url, title, artist, image });
+}
+
+function playTrack(url, title, artist, image) {
+  if (!url || url.trim() === '') {
+    mini.classList.remove('hidden');
+    updateTrackUI(title, artist, image);
+    setPlayUI(false);
+    setHint('У этого трека нет превью', true);
+    return;
+  }
+
+  const idx = trackQueue.findIndex(t => t.preview === url);
+  if (idx !== -1) currentIdx = idx;
+
+  startPlayback(url, title, artist, image);
+}
+
+function playAtIndex(i) {
+  if (!trackQueue.length) return;
+  currentIdx = ((i % trackQueue.length) + trackQueue.length) % trackQueue.length;
+  const t = trackQueue[currentIdx];
+  playTrack(t.preview, t.title, t.artist, t.image);
+}
+
+async function togglePlayback() {
+  // Если есть ожидающий трек — запускаем его (первый жест пользователя)
+  if (pendingPlay) {
+    const p = pendingPlay;
+    pendingPlay = null;
+    await startPlayback(p.url, p.title, p.artist, p.image);
+    return;
+  }
+
+  if (!audio.src || audio.src === window.location.href) return;
+
+  if (audio.paused) {
+    try {
+      await audio.play();
+      setPlayUI(true);
+      setHint('');
+    } catch(e) {
+      setPlayUI(false);
+    }
+  } else {
+    audio.pause();
+    setPlayUI(false);
+  }
+}
+
+function saveRecentTrack(track) {
+  try {
+    let recent = JSON.parse(localStorage.getItem('ms_recent') || '[]');
+    recent = recent.filter(t => t.url !== track.url);
+    recent.unshift(track);
+    recent = recent.slice(0, 12);
+    localStorage.setItem('ms_recent', JSON.stringify(recent));
+  } catch(e) {}
+}
+
+function getRecentTracks() {
+  try { return JSON.parse(localStorage.getItem('ms_recent') || '[]'); }
+  catch(e) { return []; }
+}
+
+// Ошибка загрузки медиа (CORS, недоступный URL, etc.)
+audio.addEventListener('error', () => {
+  if (!audio.src || audio.src === window.location.href) return;
+  setPlayUI(false);
+  setHint('Трек недоступен — попробуй другой', true);
+  markPlaying(null);
+});
+
+// Зависание загрузки — stall больше 8 секунд
+let stallTimer = null;
+audio.addEventListener('waiting', () => {
+  stallTimer = setTimeout(() => {
+    if (audio.readyState < 3) {
+      setHint('Загрузка зависла — попробуй другой трек', true);
+      setPlayUI(false);
+    }
+  }, 8000);
+});
+audio.addEventListener('playing', () => {
+  clearTimeout(stallTimer);
+  setHint('');
+});
+
+toggleBtn.addEventListener('click', togglePlayback);
+expToggleBtn.addEventListener('click', togglePlayback);
+
+document.getElementById('mini-prev').addEventListener('click', () => playAtIndex(currentIdx - 1));
+document.getElementById('mini-next').addEventListener('click', () => playAtIndex(currentIdx + 1));
+document.getElementById('expanded-prev').addEventListener('click', () => playAtIndex(currentIdx - 1));
+document.getElementById('expanded-next').addEventListener('click', () => playAtIndex(currentIdx + 1));
+
+[volMini, volExp].forEach(el => {
+  el.addEventListener('input', () => setVolume(parseInt(el.value)));
+});
+
+fillSlider(volMini, savedVol);
+fillSlider(volExp, savedVol);
+
+// Синхронизируем UI строго по событиям audio-элемента
+audio.addEventListener('pause', () => { if (!pendingPlay) setPlayUI(false); });
+audio.addEventListener('play',  () => setPlayUI(true));
+audio.addEventListener('ended', () => playAtIndex(currentIdx + 1));
+
+audio.addEventListener('timeupdate', () => {
+  if (!audio.duration) return;
+  const pct = (audio.currentTime / audio.duration) * 100;
+  fillSlider(progress, pct);
+  fillSlider(progressMini, pct);
+  currentTimeLbl.textContent = fmt(audio.currentTime);
+  miniCurrent.textContent = fmt(audio.currentTime);
+  durationTimeLbl.textContent = fmt(audio.duration);
+  miniDuration.textContent = fmt(audio.duration);
+});
+
+audio.addEventListener('loadedmetadata', () => {
+  durationTimeLbl.textContent = fmt(audio.duration);
+  miniDuration.textContent = fmt(audio.duration);
+});
+
+[progress, progressMini].forEach(el => {
+  el.addEventListener('input', () => {
+    if (!audio.duration) return;
+    audio.currentTime = (el.value / 100) * audio.duration;
+    fillSlider(progress, el.value);
+    fillSlider(progressMini, el.value);
+  });
+});
+
+document.getElementById('close-expanded').addEventListener('click', () => expanded.classList.remove('show'));
+
+document.addEventListener('DOMContentLoaded', buildQueue);
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
