@@ -171,20 +171,24 @@ def chat_view(request):
         # Сохраняем сообщение пользователя
         ChatMessage.objects.create(user=user, role='user', content=user_text)
 
-        # Получаем ответ бота
-        bot_reply = process_message(user_text, user=request.user)
+        # Получаем ответ бота (dict: text, tracks, suggestions)
+        result = process_message(user_text, user=request.user)
+        bot_text = result.get("text", "")
 
-        # Спец-команда очистки из бота
-        if bot_reply == '__clear__':
+        # Спец-команда очистки
+        if bot_text == '__clear__':
             if user:
                 ChatMessage.objects.filter(user=user).delete()
-            bot_reply = 'История чата очищена! 🗑️'
-            return JsonResponse({"bot": bot_reply, "cleared": True})
+            return JsonResponse({"bot": "История чата очищена.", "cleared": True, "tracks": [], "suggestions": []})
 
         # Сохраняем ответ бота
-        ChatMessage.objects.create(user=user, role='bot', content=bot_reply)
+        ChatMessage.objects.create(user=user, role='bot', content=bot_text)
 
-        return JsonResponse({"bot": bot_reply})
+        return JsonResponse({
+            "bot": bot_text,
+            "tracks": result.get("tracks", []),
+            "suggestions": result.get("suggestions", []),
+        })
 
     # GET — рендерим страницу с историей
     if user:
