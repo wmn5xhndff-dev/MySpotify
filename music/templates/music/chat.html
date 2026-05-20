@@ -25,12 +25,12 @@
         {% endif %}
     </div>
 
-    <!-- Кнопки быстрых ответов (как в TG) -->
+    <!-- Кнопки быстрых ответов -->
     <div id="suggestions-row" style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 0 6px;min-height:38px;">
         <button class="hint-chip" onclick="sendQuick('помощь')">помощь</button>
         <button class="hint-chip" onclick="sendQuick('совет')">посоветуй</button>
+        <button class="hint-chip" onclick="sendQuick('🎭 настроение')">🎭 настроение</button>
         <button class="hint-chip" onclick="sendQuick('найди трек Blinding Lights')">найди трек</button>
-        <button class="hint-chip" onclick="sendQuick('сколько у меня избранных')">моё избранное</button>
     </div>
 
     <div style="display:flex;gap:10px;padding-top:8px;border-top:1px solid var(--line);">
@@ -88,7 +88,7 @@
     margin-top: 10px;
 }
 .track-card {
-    width: 120px;
+    width: 130px;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 12px;
@@ -121,6 +121,12 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     margin-top: 2px;
 }
+.track-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
 .track-card-play {
     display: flex; align-items: center; justify-content: center;
     width: 28px; height: 28px;
@@ -128,8 +134,8 @@
     background: var(--accent);
     color: #fff; font-size: 10px;
     border: none; cursor: pointer;
-    margin-top: 6px;
     transition: opacity 0.15s;
+    flex-shrink: 0;
 }
 .track-card-play:hover { opacity: 0.85; }
 .track-card-play.no-preview {
@@ -137,6 +143,21 @@
     color: var(--muted);
     cursor: default;
 }
+/* Лайк в карточке чата */
+.track-card-like {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, transform 0.15s;
+    flex-shrink: 0;
+}
+.track-card-like:hover { color: var(--accent); border-color: var(--accent); transform: scale(1.15); }
+.track-card-like.liked { color: var(--accent); border-color: var(--accent); }
 
 /* Suggestions */
 .hint-chip {
@@ -169,16 +190,23 @@
 const chatBox = document.getElementById('chat-messages');
 const suggestionsRow = document.getElementById('suggestions-row');
 
+// Признак авторизации — если есть имя пользователя в app-meta
+const _isAuth = !!document.getElementById('app-meta').dataset.user;
+
 function scrollBottom() { chatBox.scrollTop = chatBox.scrollHeight; }
 scrollBottom();
 
-function now() {
+function nowStr() {
     const d = new Date();
     return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
 }
 
 function getCsrf() {
     return document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1]||'';
+}
+
+function esc(str) {
+    return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function addBubble(role, text) {
@@ -190,17 +218,58 @@ function addBubble(role, text) {
 
     const inner = document.createElement('div');
     inner.className = 'bubble-inner';
-    inner.textContent = text;  // безопасно, без HTML
+    inner.textContent = text;
 
     const t = document.createElement('div');
     t.className = 'bubble-time';
-    t.textContent = now();
+    t.textContent = nowStr();
 
     wrap.appendChild(inner);
     wrap.appendChild(t);
     chatBox.appendChild(wrap);
     scrollBottom();
     return wrap;
+}
+
+// Добавить трек в избранное через AJAX (POST /add/)
+async function addFavorite(btn, track) {
+    if (!_isAuth) {
+        alert('Войди в аккаунт, чтобы добавлять треки в избранное.');
+        return;
+    }
+    if (btn.dataset.songId) {
+        // Уже в избранном — ничего не делаем (toggleFavorite через отдельный маршрут)
+        return;
+    }
+    btn.disabled = true;
+    try {
+        const body = new URLSearchParams({
+            title: track.title,
+            artist: track.artist_name,
+            image_url: track.cover_xl || track.cover || '',
+            deezer_id: track.id,
+            preview_url: track.preview || '',
+            next: '/chat/',
+        });
+        const res = await fetch('/add/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': getCsrf(),
+            },
+            body: body.toString(),
+        });
+        // Django редиректит обратно — значит успех
+        if (res.ok || res.redirected) {
+            btn.classList.add('liked');
+            btn.textContent = '♥';
+            btn.title = 'В избранном';
+        }
+    } catch(e) {
+        console.error('Ошибка добавления в избранное:', e);
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 function addTrackCards(tracks, parentBubble) {
@@ -222,26 +291,37 @@ function addTrackCards(tracks, parentBubble) {
             <div class="track-card-info">
                 <div class="track-card-title">${esc(t.title)}</div>
                 <div class="track-card-artist">${esc(t.artist_name)}</div>
-                <button class="track-card-play ${hasPreview ? '' : 'no-preview'}"
-                        title="${hasPreview ? 'Слушать' : 'Нет превью'}">
-                    ${hasPreview ? '▶' : '—'}
-                </button>
+                <div class="track-card-actions">
+                    <button class="track-card-play ${hasPreview ? '' : 'no-preview'}"
+                            title="${hasPreview ? 'Слушать' : 'Нет превью'}">
+                        ${hasPreview ? '▶' : '—'}
+                    </button>
+                    <button class="track-card-like" title="В избранное">♡</button>
+                </div>
             </div>`;
 
+        const playBtn = card.querySelector('.track-card-play');
+        const likeBtn = card.querySelector('.track-card-like');
+
         if (hasPreview) {
-            card.querySelector('.track-card-play').addEventListener('click', (e) => {
+            playBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 playTrack(t.preview, t.title, t.artist_name, t.cover_xl || t.cover);
             });
-            card.addEventListener('click', () => {
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('.track-card-like')) return;
                 playTrack(t.preview, t.title, t.artist_name, t.cover_xl || t.cover);
             });
         }
 
+        likeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            addFavorite(likeBtn, t);
+        });
+
         row.appendChild(card);
     });
 
-    // Вставляем после bubble-inner внутри parentBubble
     parentBubble.appendChild(row);
     scrollBottom();
 }
@@ -258,10 +338,6 @@ function setSuggestions(suggestions) {
     });
 }
 
-function esc(str) {
-    return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
 function addTyping() {
     const wrap = document.createElement('div');
     wrap.className = 'chat-bubble bot typing-indicator';
@@ -276,6 +352,7 @@ async function sendMessage() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+    input.focus();
 
     addBubble('user', text);
     const typing = addTyping();
@@ -294,7 +371,7 @@ async function sendMessage() {
 
         if (data.cleared) {
             chatBox.innerHTML = '<div id="chat-welcome" style="text-align:center;padding:48px 20px;color:var(--muted);"><div style="font-size:14px;color:var(--text);">История очищена.</div></div>';
-            setSuggestions(["помощь", "совет", "найди трек"]);
+            setSuggestions(["помощь", "совет", "🎭 настроение", "найди трек"]);
         } else if (data.bot) {
             const botWrap = addBubble('bot', data.bot);
             addTrackCards(data.tracks, botWrap);

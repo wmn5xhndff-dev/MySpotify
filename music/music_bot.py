@@ -10,7 +10,9 @@ from urllib.parse import quote_plus
 import requests
 
 DEEZER_TIMEOUT = 8
-WIKI_TIMEOUT = 6
+LASTFM_TIMEOUT = 6
+LASTFM_API_KEY = '953df161bc52776025237474a9bd9b45'
+LASTFM_BASE = 'http://ws.audioscrobbler.com/2.0/'
 
 GREETINGS = {'привет', 'хай', 'здравствуй', 'hello', 'hi', 'йоу', 'ку'}
 HELP_KEYWORDS = {'помощь', 'помоги', 'help', 'что умеешь', 'команды'}
@@ -23,11 +25,12 @@ HELP_TEXT = """Я Music Assistant — твой музыкальный помощ
 - найди трек [название]
 - найди исполнителя [имя]
 - топ треков [артист]
-- кто такой [артист] — биография из Wikipedia
+- кто такой [артист] — биография
 - расскажи о [жанр]
+- настроение — подбор музыки по настроению
 - совет — рекомендация
 - сколько у меня избранных
-- очисти историю"""
+- очисти историю (clear)"""
 
 GENRE_INFO = {
     'поп': 'Поп-музыка — популярная музыка с простыми мелодиями и запоминающимися припевами. Главные звезды: Taylor Swift, Ed Sheeran, Ариана Гранде.',
@@ -44,22 +47,35 @@ GENRE_INFO = {
 
 RECOMMENDATIONS = [
     ("Blinding Lights", "The Weeknd"),
-    ("Bohemian Rhapsody", "Queen"),
-    ("God's Plan", "Drake"),
-    ("Shape of You", "Ed Sheeran"),
-    ("Lose Yourself", "Eminem"),
-    ("Starboy", "The Weeknd"),
-    ("Levitating", "Dua Lipa"),
+    ("Harvey", "Her's"),
+    ("цветы", "тёмный принц"),
+    ("Apple Cider", "beabadoobee"),
+    ("sad amber perfume", "королевский XVII"),
+    ("Babydoll", "Dominic Fike"),
+    ("больше, чем творчество", "CUPSIZE"),
 ]
 
-MOOD_QUERIES = {
-    'грустн': "sad songs acoustic",
-    'счастлив': "happy upbeat pop",
-    'злой': "metal aggressive",
-    'романтич': "romantic love songs",
-    'работа': "lofi focus work",
-    'тренировк': "workout gym motivation",
+# Двухэтапное настроение: ключ = текст кнопки (lowercase), значение = поисковый запрос в Deezer
+MOOD_CHIPS = {
+    '😭 грустно':      ('xxxtentacion', 'Грустные треки подобраны — пусть музыка поможет.'),
+    '🚀 тренировка':   ('phonk', 'Заряд для тренировки — вперёд!'),
+    '❤️ романтика':    ('Cigarettes After Sex', 'Романтические треки — наслаждайся.'),
+    '☕️ расслабление': ('lofi', 'Расслабься — музыка уже играет.'),
+    '😊 радость':      ('beabadoobee', 'Позитивные треки — хорошего настроения!'),
+    '🎉 вечеринка':    ('PSY', 'Треки для вечеринки — погнали!'),
 }
+
+# Старый словарь для текстового ввода настроения
+MOOD_QUERIES = {
+    'грустно': "xxxtentacion",
+    'счастлив': "beabadoobee",
+    'злой': "metal aggressive",
+    'романтич': "Cigarettes After Sex",
+    'работа': "lofi",
+    'тренировк': "phonk",
+}
+
+MAIN_CHIPS = ["❔помощь", "🎶 совет", "🎭 настроение", "найди трек", "назад"]
 
 _rec_idx = [0]
 
@@ -86,63 +102,101 @@ def _fmt_track(t):
     }
 
 
-def _wiki_summary(query):
-    """Получает краткую биографию из Wikipedia (русский, потом английский)."""
-    for lang in ('ru', 'en'):
-        try:
-            url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote_plus(query)}"
-            r = requests.get(url, timeout=WIKI_TIMEOUT, headers={"User-Agent": "MySpotify/1.0"})
-            if r.status_code == 200:
-                data = r.json()
-                extract = data.get("extract", "")
-                if extract and len(extract) > 80:
-                    # Берём первые 2 предложения
-                    sentences = extract.split('. ')
-                    short = '. '.join(sentences[:2])
-                    if not short.endswith('.'):
-                        short += '.'
-                    return short
-        except Exception:
-            pass
-    return None
+def _lastfm_bio(artist_name):
+    """Биография артиста через Last.fm artist.getInfo."""
+    try:
+        params = {
+            'method': 'artist.getInfo',
+            'artist': artist_name,
+            'api_key': LASTFM_API_KEY,
+            'format': 'json',
+            'lang': 'ru',
+        }
+        r = requests.get(LASTFM_BASE, params=params, timeout=LASTFM_TIMEOUT)
+        if r.status_code != 200:
+            return None, []
+        data = r.json()
+        artist_data = data.get('artist', {})
+        if not artist_data:
+            return None, []
+
+        # Биография
+        bio_raw = artist_data.get('bio', {}).get('summary', '') or ''
+        # Убираем ссылку Last.fm в конце (<a href=...>Read more...</a>)
+        bio_clean = re.sub(r'<a\s[^>]*>.*?</a>', '', bio_raw, flags=re.IGNORECASE | re.DOTALL).strip()
+        bio_clean = re.sub(r'\s+', ' ', bio_clean).strip()
+        if len(bio_clean) < 60:
+            bio_clean = None
+        else:
+            # Берём первые 3 предложения
+            sentences = bio_clean.split('. ')
+            bio_clean = '. '.join(sentences[:3]).strip()
+            if bio_clean and not bio_clean.endswith('.'):
+                bio_clean += '.'
+
+        # Похожие артисты для чипсов
+        similar_raw = artist_data.get('similar', {}).get('artist', [])
+        similar = [a['name'] for a in similar_raw[:3] if a.get('name')]
+
+        return bio_clean, similar
+    except Exception:
+        return None, []
 
 
 def _reply(text, tracks=None, suggestions=None):
     return {
         "text": text,
         "tracks": tracks or [],
-        "suggestions": suggestions or [],
+        "suggestions": suggestions or MAIN_CHIPS,
     }
 
 
 def process_message(text: str, user=None) -> dict:
     if not text or not text.strip():
-        return _reply("Напиши что-нибудь! Я слушаю.", suggestions=["помощь", "совет", "найди трек"])
+        return _reply("Напиши что-нибудь! Я слушаю.")
 
     msg = text.strip().lower()
+
+    # 0. Чипсы настроения (первый приоритет — конкретный выбор)
+    if msg in MOOD_CHIPS:
+        deezer_query, mood_text = MOOD_CHIPS[msg]
+        tracks = _deezer_search(deezer_query, limit=5)
+        return _reply(
+            mood_text,
+            tracks=tracks,
+            suggestions=["🔄 обновить треки", "🎭 другое настроение", "🔍 найди трек"]
+        )
+
+    # Обновить треки — повтор последнего настроения (простой рефреш через совет)
+    if msg in ('🔄 обновить треки',):
+        tracks = _deezer_search("top hits popular", limit=5)
+        return _reply("Вот новые треки:", tracks=tracks, suggestions=["🔄 обновить треки", "🎭 другое настроение", "найди трек"])
+
+    if msg in ('🎭 другое настроение',):
+        msg = 'настроение'  # fall through к блоку настроения ниже
 
     # 1. Приветствие
     if any(g in msg for g in GREETINGS):
         name = f", {user.username}" if user and user.is_authenticated else ""
         return _reply(
             f"Привет{name}! Я Music Assistant. Чем помочь?",
-            suggestions=["помощь", "совет", "найди трек", "топ треков Drake"]
+            suggestions=MAIN_CHIPS
         )
 
     # 2. До свидания
     if any(b in msg for b in BYE_KEYWORDS):
-        return _reply("Пока! Возвращайся за хорошей музыкой.")
+        return _reply("Пока! Возвращайся за хорошей музыкой.", suggestions=MAIN_CHIPS)
 
     # 3. Спасибо
     if any(t in msg for t in THANKS_KEYWORDS):
-        return _reply("Пожалуйста! Рад помочь.", suggestions=["совет", "найди трек"])
+        return _reply("Пожалуйста! Рад помочь.", suggestions=MAIN_CHIPS)
 
     # 4. Помощь
     if any(h in msg for h in HELP_KEYWORDS):
-        return _reply(HELP_TEXT, suggestions=["совет", "найди трек Blinding Lights", "кто такой Drake", "расскажи о джаз"])
+        return _reply(HELP_TEXT, suggestions=["совет", "🎭 настроение", "найди трек", "топ треков", "кто такой", "назад"])
 
     # 5. Очистка
-    if 'очисти' in msg or 'очистить' in msg or 'сбрось' in msg:
+    if 'очисти' in msg or 'очистить' in msg or 'сбрось' in msg or 'сбросить' in msg or 'очистка' in msg or 'сброс' in msg or 'clear' in msg:
         return _reply("__clear__")
 
     # 6. Статистика избранных
@@ -155,7 +209,18 @@ def process_message(text: str, user=None) -> dict:
             return _reply(f"У тебя {count} {word} в избранном.", suggestions=["найди трек", "совет"])
         return _reply("Войди в аккаунт, чтобы я мог показать твою библиотеку.")
 
-    # 7. Совет / рекомендация
+    # 7. Настроение — показываем меню выбора
+    if 'настроение' in msg or msg == '🎭 настроение':
+        return _reply(
+            "Выбери под какое настроение подобрать музыку:",
+            suggestions=["😭 грустно", "🚀 тренировка", "❤️ романтика", "☕️ расслабление", "😊 радость", "🎉 вечеринка", "🔙 назад"]
+        )
+
+    # 8. Кнопка "Назад"
+    if msg in ('🔙 назад', 'назад'):
+        return _reply("Главное меню:", suggestions=MAIN_CHIPS)
+
+    # 9. Совет / рекомендация
     if any(w in msg for w in ['совет', 'порекомендуй', 'что послушать', 'посоветуй', 'рекомендация']):
         rec = RECOMMENDATIONS[_rec_idx[0] % len(RECOMMENDATIONS)]
         _rec_idx[0] += 1
@@ -163,10 +228,17 @@ def process_message(text: str, user=None) -> dict:
         return _reply(
             f"Рекомендую: {rec[0]} — {rec[1]}",
             tracks=tracks,
-            suggestions=["ещё совет", "найди трек", "топ треков The Weeknd"]
+            suggestions=["ещё совет", "найди трек", f"кто такой {rec[1]}", "назад"]
         )
 
-    # 8. Жанр
+    # 10. Ещё совет
+    if 'ещё' in msg and 'совет' in msg:
+        rec = RECOMMENDATIONS[_rec_idx[0] % len(RECOMMENDATIONS)]
+        _rec_idx[0] += 1
+        tracks = _deezer_search(f"{rec[0]} {rec[1]}", limit=4)
+        return _reply(f"Рекомендую: {rec[0]} — {rec[1]}", tracks=tracks, suggestions=["ещё совет", "найди трек"])
+
+    # 11. Жанр
     for genre, info in GENRE_INFO.items():
         if genre in msg:
             tracks = _deezer_search(genre, limit=4)
@@ -176,20 +248,27 @@ def process_message(text: str, user=None) -> dict:
                 suggestions=[f"топ треков {genre}", "совет", "помощь"]
             )
 
-    # 9. Кто такой / биография
-    if re.search(r'кто такой|кто такая|расскажи про|расскажи о|биография', msg):
-        query = re.sub(r'кто такой|кто такая|расскажи про|расскажи о|биография', '', msg).strip()
+    # 12. Кто такой / биография — Last.fm
+    if re.search(r'кто такой|кто такая|расскажи про|расскажи о|биография|инфо о', msg):
+        query = re.sub(r'кто такой|кто такая|расскажи про|расскажи о|биография|инфо о', '', msg).strip()
         if not query:
             return _reply("Напиши имя артиста, например: кто такой Drake")
-        wiki = _wiki_summary(query)
-        tracks = _deezer_search(query, limit=4)
-        if wiki:
-            return _reply(wiki, tracks=tracks, suggestions=[f"топ треков {query}", "совет"])
-        elif tracks:
-            return _reply(f"Вот треки артиста {query.title()}:", tracks=tracks, suggestions=["совет"])
-        return _reply(f"Не нашел информации о {query}.", suggestions=["помощь"])
 
-    # 10. Топ треков
+        bio, similar = _lastfm_bio(query)
+        tracks = _deezer_search(query, limit=4)
+
+        # Чипсы: топ треков + похожие артисты
+        chips = [f"топ треков {query}"]
+        chips += [f"кто такой {s}" for s in similar[:2]]
+        chips.append("совет")
+
+        if bio:
+            return _reply(bio, tracks=tracks, suggestions=chips)
+        elif tracks:
+            return _reply(f"Вот треки артиста {query.title()}:", tracks=tracks, suggestions=chips)
+        return _reply(f"Не нашел информации о {query}.", suggestions=MAIN_CHIPS)
+
+    # 13. Топ треков
     if 'топ' in msg or 'лучшие треки' in msg or 'хиты' in msg:
         query = re.sub(r'топ треков|топ|лучшие треки|хиты', '', msg).strip()
         if not query:
@@ -197,7 +276,7 @@ def process_message(text: str, user=None) -> dict:
         tracks = _deezer_search(f'artist:"{query}"', limit=5) or _deezer_search(query, limit=5)
         return _reply(f"Топ треков {query.title()}:", tracks=tracks, suggestions=["совет", f"кто такой {query}"])
 
-    # 11. Найти исполнителя
+    # 14. Найти исполнителя
     if re.search(r'найди исполнителя|найди артиста|исполнитель', msg):
         query = re.sub(r'найди исполнителя|найди артиста|исполнитель', '', msg).strip()
         if not query:
@@ -205,40 +284,33 @@ def process_message(text: str, user=None) -> dict:
         tracks = _deezer_search(query, limit=5)
         return _reply(f"Треки артиста {query.title()}:", tracks=tracks, suggestions=[f"кто такой {query}", "совет"])
 
-    # 12. Найти трек
-    if re.search(r'найди трек|найди песню|поищи|найди', msg):
-        query = re.sub(r'найди трек|найди песню|поищи трек|поищи|найди', '', msg).strip()
+    # 15. Найти трек
+    if re.search(r'найди трек|найди песню|поищи|найди|🔍 найди трек', msg):
+        query = re.sub(r'найди трек|найди песню|поищи трек|поищи|найди|🔍 найди трек', '', msg).strip()
         if not query:
             return _reply("Напиши название трека.")
         tracks = _deezer_search(query, limit=5)
         if tracks:
-            return _reply(f"Результаты поиска «{query}»:", tracks=tracks, suggestions=["ещё совет", "помощь"])
-        return _reply(f"Ничего не нашел по запросу «{query}».", suggestions=["попробуй другой запрос", "помощь"])
+            return _reply(f"Результаты поиска «{query}»:", tracks=tracks, suggestions=["ещё совет", "помощь", "назад"])
+        return _reply(f"Ничего не нашел по запросу «{query}».", suggestions=["попробуй другой запрос", "помощь", "назад"])
 
-    # 13. Настроение
+    # 16. Текстовое настроение
     for mood_key, mood_query in MOOD_QUERIES.items():
         if mood_key in msg:
             tracks = _deezer_search(mood_query, limit=4)
-            return _reply("Подобрал треки под настроение:", tracks=tracks, suggestions=["ещё совет", "найди трек"])
+            return _reply("Подобрал треки под настроение:", tracks=tracks, suggestions=["🎭 настроение", "ещё совет", "найди трек"])
 
-    # 14. Что играет
+    # 17. Что играет
     if 'что играет' in msg or 'что сейчас' in msg:
-        return _reply("Нажми на любой трек в поиске — он сразу начнет играть!", suggestions=["найди трек", "совет"])
+        return _reply("Нажми на любой трек — он сразу начнет играть!", suggestions=MAIN_CHIPS)
 
-    # 15. Ещё совет
-    if 'ещё' in msg and 'совет' in msg:
-        rec = RECOMMENDATIONS[_rec_idx[0] % len(RECOMMENDATIONS)]
-        _rec_idx[0] += 1
-        tracks = _deezer_search(f"{rec[0]} {rec[1]}", limit=4)
-        return _reply(f"Рекомендую: {rec[0]} — {rec[1]}", tracks=tracks, suggestions=["ещё совет", "найди трек"])
-
-    # 16. Fallback — пробуем искать
+    # 18. Fallback
     if len(msg) > 2:
         tracks = _deezer_search(msg, limit=3)
         if tracks:
-            return _reply(f"Вот что нашел по запросу «{text.strip()}»:", tracks=tracks, suggestions=["помощь", "совет"])
+            return _reply(f"Вот что нашел по запросу «{text.strip()}»:", tracks=tracks, suggestions=["помощь", "совет", "назад"])
 
     return _reply(
-        "Не совсем понял. Попробуй:\n- найди трек [название]\n- найди исполнителя [имя]\n- совет\n- помощь",
-        suggestions=["помощь", "совет", "найди трек"]
+        "Не совсем понял. Попробуй:\n- найди трек [название]\n- кто такой [артист]\n- 🎭 настроение\n- помощь",
+        suggestions=MAIN_CHIPS
     )
