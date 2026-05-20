@@ -298,9 +298,9 @@ button { cursor: pointer; font-family: inherit; }
   height: 40px;
   stroke: var(--muted);
   fill: none;
-  stroke-width: 1.5;
+  stroke-width: 1.8;
   margin-bottom: 14px;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 /* ── TRACK LIST ── */
