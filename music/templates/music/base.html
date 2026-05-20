@@ -202,6 +202,10 @@ const hint           = document.getElementById('player-hint');
 let trackQueue = [];
 let currentIdx = -1;
 let pendingPlay = null;
+let playbackToken = 0;
+let stalledUrl = null;
+let stallRetryCount = 0;
+const MAX_STALL_RETRY = 1;
 
 function fmt(sec) {
   if (!Number.isFinite(sec)) return "0:00";
@@ -270,6 +274,9 @@ function updateTrackUI(title, artist, image) {
 }
 
 async function startPlayback(url, title, artist, image) {
+  const token = ++playbackToken;
+  stalledUrl = null;
+  stallRetryCount = 0;
   setHint('');
   updateTrackUI(title, artist, image);
   markPlaying(url);
@@ -282,13 +289,16 @@ async function startPlayback(url, title, artist, image) {
   durationTimeLbl.textContent = '0:00';
   miniDuration.textContent = '0:00';
 
+  audio.pause();
   audio.src = url;
   audio.load();
 
   try {
     await audio.play();
+    if (token !== playbackToken) return;
     setPlayUI(true);
   } catch (err) {
+    if (token !== playbackToken) return;
     if (err.name === 'NotAllowedError') {
       setPlayUI(false);
       setHint('▶ Нажмите Play для воспроизведения', false);
@@ -349,6 +359,33 @@ async function togglePlayback() {
   }
 }
 
+function recoverFromStall() {
+  const currentUrl = audio.currentSrc || audio.src;
+  if (!currentUrl) return;
+
+  if (stalledUrl !== currentUrl) {
+    stalledUrl = currentUrl;
+    stallRetryCount = 0;
+  }
+
+  if (stallRetryCount < MAX_STALL_RETRY) {
+    stallRetryCount += 1;
+    const t = { url: currentUrl, title: playerTitle.textContent, artist: playerArtist.textContent, image: playerCover.src };
+    setHint('Перезапускаю трек…', false);
+    startPlayback(t.url, t.title, t.artist, t.image);
+    return;
+  }
+
+  setHint('Трек завис, переключаю на следующий', true);
+  if (trackQueue.length > 1 && currentIdx !== -1) {
+    playAtIndex(currentIdx + 1);
+  } else {
+    audio.pause();
+    setPlayUI(false);
+    markPlaying(null);
+  }
+}
+
 audio.addEventListener('error', () => {
   if (!audio.src || audio.src === window.location.href) return;
   setPlayUI(false);
@@ -360,8 +397,7 @@ let stallTimer = null;
 audio.addEventListener('waiting', () => {
   stallTimer = setTimeout(() => {
     if (audio.readyState < 3) {
-      setHint('Загрузка зависла — попробуй другой трек', true);
-      setPlayUI(false);
+      recoverFromStall();
     }
   }, 8000);
 });

@@ -12,6 +12,9 @@ from django.views.decorators.http import require_POST
 from .models import ChatMessage, Song
 from .music_bot import process_message
 
+CHAT_SESSION_KEY = "chat_history"
+MAX_CHAT_HISTORY = 100
+
 DEEZER_TIMEOUT_SECONDS = 10
 DEEZER_PAGE_SIZE = 20
 
@@ -152,6 +155,13 @@ def toggle_favorite(request, song_id):
 
 # ── CHAT ──────────────────────────────────────────────────────────────────────
 
+def _trim_session_history(session):
+    history = session.get(CHAT_SESSION_KEY, [])
+    if len(history) > MAX_CHAT_HISTORY:
+        session[CHAT_SESSION_KEY] = history[-MAX_CHAT_HISTORY:]
+        session.modified = True
+
+
 def chat_view(request):
     """Страница чат-бота Music Assistant."""
     user = request.user if request.user.is_authenticated else None
@@ -166,12 +176,21 @@ def chat_view(request):
         if user_text.lower() in ('очисти историю', 'очистить историю', 'сбрось историю'):
             if user:
                 ChatMessage.objects.filter(user=user).delete()
+            else:
+                request.session[CHAT_SESSION_KEY] = []
+                request.session.modified = True
             return JsonResponse({"bot": "История чата очищена! 🗑️", "cleared": True})
 
         # Сохраняем сообщение пользователя
-        ChatMessage.objects.create(user=user, role='user', content=user_text)
+        if user:
+            ChatMessage.objects.create(user=user, role='user', content=user_text)
+        else:
+            history = request.session.get(CHAT_SESSION_KEY, [])
+            history.append({"role": "user", "content": user_text})
+            request.session[CHAT_SESSION_KEY] = history
+            _trim_session_history(request.session)
 
-        # Получаем ответ бота (dict: text, tracks, suggestions)
+        # Получаем ответ бота
         result = process_message(user_text, user=request.user)
         bot_text = result.get("text", "")
 
@@ -179,10 +198,19 @@ def chat_view(request):
         if bot_text == '__clear__':
             if user:
                 ChatMessage.objects.filter(user=user).delete()
+            else:
+                request.session[CHAT_SESSION_KEY] = []
+                request.session.modified = True
             return JsonResponse({"bot": "История чата очищена.", "cleared": True, "tracks": [], "suggestions": []})
 
         # Сохраняем ответ бота
-        ChatMessage.objects.create(user=user, role='bot', content=bot_text)
+        if user:
+            ChatMessage.objects.create(user=user, role='bot', content=bot_text)
+        else:
+            history = request.session.get(CHAT_SESSION_KEY, [])
+            history.append({"role": "bot", "content": bot_text})
+            request.session[CHAT_SESSION_KEY] = history
+            _trim_session_history(request.session)
 
         return JsonResponse({
             "bot": bot_text,
@@ -192,9 +220,9 @@ def chat_view(request):
 
     # GET — рендерим страницу с историей
     if user:
-        history = ChatMessage.objects.filter(user=user).order_by('created_at')[:100]
+        history = ChatMessage.objects.filter(user=user).order_by('created_at')[:MAX_CHAT_HISTORY]
     else:
-        history = []
+        history = request.session.get(CHAT_SESSION_KEY, [])
 
     return render(request, "music/chat.html", {"history": history})
 

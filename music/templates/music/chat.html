@@ -19,7 +19,7 @@
         {% for msg in history %}
         <div class="chat-bubble {{ msg.role }}">
             <div class="bubble-inner">{{ msg.content|linebreaksbr }}</div>
-            <div class="bubble-time">{{ msg.created_at|date:"H:i" }}</div>
+            <div class="bubble-time">{% if msg.created_at %}{{ msg.created_at|date:"H:i" }}{% else %}сейчас{% endif %}</div>
         </div>
         {% endfor %}
         {% endif %}
@@ -348,6 +348,7 @@ function addTyping() {
 }
 
 async function sendMessage() {
+    if (sendingMessage) return;
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (!text) return;
@@ -356,6 +357,7 @@ async function sendMessage() {
 
     addBubble('user', text);
     const typing = addTyping();
+    sendingMessage = true;
 
     try {
         const res = await fetch('/chat/', {
@@ -380,10 +382,14 @@ async function sendMessage() {
     } catch(e) {
         typing.remove();
         addBubble('bot', 'Ошибка соединения. Попробуй ещё раз.');
+    } finally {
+        sendingMessage = false;
     }
 }
+let sendingMessage = false;
 
 function sendQuick(text) {
+    if (sendingMessage) return;
     document.getElementById('chat-input').value = text;
     sendMessage();
 }
