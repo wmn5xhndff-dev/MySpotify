@@ -13,7 +13,7 @@
         {% if not history %}
         <div id="chat-welcome" style="text-align:center;padding:48px 20px;color:var(--muted);">
             <div style="font-size:14px;margin-bottom:8px;color:var(--text);">Music Assistant готов к работе.</div>
-            <div style="font-size:13px;">Напиши <strong style="color:var(--text)">помощь</strong> чтобы узнать мои возможности.</div>
+            <div style="font-size:13px;">Напиши <strong style="color:var(--text);">помощь</strong> чтобы узнать мои возможности.</div>
         </div>
         {% else %}
         {% for msg in history %}
@@ -193,6 +193,9 @@ const suggestionsRow = document.getElementById('suggestions-row');
 // Признак авторизации — если есть имя пользователя в app-meta
 const _isAuth = !!document.getElementById('app-meta').dataset.user;
 
+// FIX: Временная очередь для чат-треков (не зависит от DOM)
+let _chatTrackQueue = [];
+
 function scrollBottom() { chatBox.scrollTop = chatBox.scrollHeight; }
 scrollBottom();
 
@@ -277,7 +280,7 @@ function addTrackCards(tracks, parentBubble) {
     const row = document.createElement('div');
     row.className = 'track-cards';
 
-    tracks.forEach(t => {
+    tracks.forEach((t, idx) => {
         const card = document.createElement('div');
         card.className = 'track-card';
 
@@ -306,11 +309,28 @@ function addTrackCards(tracks, parentBubble) {
         if (hasPreview) {
             playBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                // FIX: Создаём временную очередь для чат-треков
+                _chatTrackQueue = tracks
+                    .filter(tr => tr.preview)
+                    .map(tr => ({
+                        preview: tr.preview,
+                        title: tr.title,
+                        artist: tr.artist_name,
+                        image: tr.cover_xl || tr.cover,
+                    }));
+                // Находим индекс текущего трека
+                const trackIdx = _chatTrackQueue.findIndex(tr => tr.preview === t.preview);
+                // Подменяем глобальную очередь
+                const originalQueue = trackQueue;
+                const originalIdx = currentIdx;
+                trackQueue = _chatTrackQueue;
+                currentIdx = trackIdx;
+                // Воспроизводим
                 playTrack(t.preview, t.title, t.artist_name, t.cover_xl || t.cover);
             });
             card.addEventListener('click', (e) => {
                 if (e.target.closest('.track-card-like')) return;
-                playTrack(t.preview, t.title, t.artist_name, t.cover_xl || t.cover);
+                playBtn.click();
             });
         }
 

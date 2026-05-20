@@ -318,6 +318,11 @@ button { cursor: pointer; font-family: inherit; }
   transition: background 0.15s, border-color 0.15s;
 }
 
+.delete-recent-btn:hover {
+    opacity: 1 !important;
+    transform: scale(1.05);
+}
+
 .track-row:hover { background: #1d1d24; border-color: #383845; }
 .track-row.playing { border-color: rgba(192,40,62,0.35); background: rgba(192,40,62,0.06); }
 

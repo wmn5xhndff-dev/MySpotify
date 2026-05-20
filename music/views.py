@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
+from django.utils import timezone
 
 from .models import ChatMessage, Song
 from .music_bot import process_message
@@ -111,7 +112,9 @@ def search_more(request):
 
 def favorites(request):
     if request.user.is_authenticated:
-        songs = Song.objects.filter(user=request.user, is_favorite=True)
+        songs = Song.objects.filter(user=request.user, is_favorite=True).order_by(
+            "-created_at"
+        )
     else:
         songs = Song.objects.none()
     return render(request, "music/favorites.html", {"songs": songs})
@@ -134,9 +137,12 @@ def add_song(request):
         song, created = Song.objects.get_or_create(
             user=user, deezer_id=deezer_id, defaults=defaults
         )
-        if not created and not song.is_favorite:
+        if not created:
             song.is_favorite = True
-            song.save(update_fields=["is_favorite"])
+            song.created_at = (
+                timezone.now()
+            )  # Обновляем дату, чтобы трек поднялся наверх списка
+            song.save(update_fields=["is_favorite", "created_at"])
     elif user:
         Song.objects.create(user=user, **defaults)
 

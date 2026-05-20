@@ -162,8 +162,16 @@ const _volKey    = `ms_volume__${_appUser}`;
 
 function saveRecentTrack(track) {
     try {
+        if (!track.title || !track.artist) return;
         let recent = JSON.parse(localStorage.getItem(_recentKey) || '[]');
-        recent = recent.filter(t => t.url !== track.url);
+        
+        // Фильтруем ТОЛЬКО по названию и артисту, игнорируя разные временные ссылки Deezer!
+        recent = recent.filter(t => {
+            const isSameTitle = t.title.trim().toLowerCase() === track.title.trim().toLowerCase();
+            const isSameArtist = t.artist.trim().toLowerCase() === track.artist.trim().toLowerCase();
+            return !(isSameTitle && isSameArtist);
+        });
+        
         recent.unshift(track);
         recent = recent.slice(0, 12);
         localStorage.setItem(_recentKey, JSON.stringify(recent));
@@ -173,6 +181,16 @@ function saveRecentTrack(track) {
 function getRecentTracks() {
     try { return JSON.parse(localStorage.getItem(_recentKey) || '[]'); }
     catch(e) { return []; }
+}
+
+// Новая функция для очистки истории прослушивания
+function clearRecentTracks() {
+    try {
+        localStorage.removeItem(_recentKey);
+        window.location.reload(); // Перезагружаем страницу, чтобы скрылся блок с треками
+    } catch(e) {
+        console.error("Не удалось очистить историю", e);
+    }
 }
 
 // ── PLAYER ────────────────────────────────────────────────────────────────────
@@ -310,10 +328,14 @@ async function startPlayback(url, title, artist, image) {
     }
   }
 
-  saveRecentTrack({ url, title, artist, image });
+  // FIX: Сохраняем в недавние только если трек реально имеет preview URL
+  if (url && url.trim() !== '') {
+    saveRecentTrack({ url, title, artist, image });
+  }
 }
 
 function playTrack(url, title, artist, image) {
+  buildQueue();
   if (!url || url.trim() === '') {
     mini.classList.remove('hidden');
     updateTrackUI(title, artist, image);
