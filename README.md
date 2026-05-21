@@ -174,7 +174,10 @@ The chatbot is available at `/chat/`. Below are supported commands:
 
 ## 🖼️ Screenshots
 
-> *(Add screenshots of the Search page, Favorites page, and Chat page here)*
+> ![alt text](docs/screenshots/search.png)
+> ![alt text](docs/screenshots/fav.png)
+> ![alt text](docs/screenshots/chat.png)
+> ![alt text](docs/screenshots/find.png)
 
 ---
 
