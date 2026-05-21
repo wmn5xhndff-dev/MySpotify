@@ -176,6 +176,7 @@ The chatbot is available at `/chat/`. Below are supported commands:
 
 > ![alt text](docs/screenshots/search.png)
 > ![alt text](docs/screenshots/fav.png)
+> ![alt text](docs/screenshots/player.png)
 > ![alt text](docs/screenshots/chat.png)
 > ![alt text](docs/screenshots/find.png)
 
